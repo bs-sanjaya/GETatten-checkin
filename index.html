@@ -90,7 +90,7 @@
 
   <script>
     // ⚠️ REPLACE THIS WITH YOUR APPS SCRIPT URL
-    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxoT_gL_QGXlk4FNEp9-5t7V8eYPDeDUfmxxgtI6Ay7hx6gscDU0HXFVct6f9_DzhurdA/exec';
+    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzuDLudKjXWGIzq6agit7IIz9YynVgnUDcTimzju52GO7RCceH8drpYJ7c78onPQZgj4Q/exec';
 
     let html5QrCode = null;
     let isScanning = false;
@@ -138,49 +138,47 @@
       showResult('', '🔍 Read: <strong>' + escapeHtml(decodedText) + '</strong>');
 
       // Call Apps Script via fetch
-      fetch(APPS_SCRIPT_URL + '?qrData=' + encodeURIComponent(decodedText))
-        .then(res => res.json())
-        .then(response => {
-          if (response.status === 'success') {
-            setStatus('✅ Done! Ready for next scan.');
-            showResult('success', '✅ Checked in: <strong>' + escapeHtml(response.name) + '</strong>');
-          } else if (response.status === 'already') {
-            setStatus('⚠️ Already checked in.');
-            showResult('warning', '⚠️ Already checked in: <strong>' + escapeHtml(response.name) + '</strong>');
-          } else if (response.status === 'notfound') {
-            setStatus('❌ Not found in sheet.');
-            showResult('error', '❌ QR code not found in the sheet.');
-          } else {
-            setStatus('❌ Error occurred.');
-            showResult('error', '❌ ' + escapeHtml(response.message || 'Unknown error'));
-          }
-        })
-        .catch(err => {
-          setStatus('❌ Network error.');
-          showResult('error', '❌ Could not reach server. Check your URL.');
-        })
-        .finally(() => {
-          setTimeout(() => {
-            isProcessing = false;
-            if (isScanning) html5QrCode.resume();
-          }, 2500);
-        });
-    }
+    // Use JSONP to bypass CORS
+      const callbackName = 'callback_' + Date.now();
+      const script = document.createElement('script');
+      
+      window[callbackName] = function(response) {
+        delete window[callbackName];
+        document.body.removeChild(script);
+        
+        if (response.status === 'success') {
+          setStatus('✅ Done! Ready for next scan.');
+          showResult('success', '✅ Checked in: <strong>' + escapeHtml(response.name) + '</strong>');
+        } else if (response.status === 'already') {
+          setStatus('⚠️ Already checked in.');
+          showResult('warning', '⚠️ Already checked in: <strong>' + escapeHtml(response.name) + '</strong>');
+        } else if (response.status === 'notfound') {
+          setStatus('❌ Not found in sheet.');
+          showResult('error', '❌ QR code not found in the sheet.');
+        } else {
+          setStatus('❌ Error occurred.');
+          showResult('error', '❌ ' + escapeHtml(response.message || 'Unknown error'));
+        }
 
-    function setStatus(msg) {
-      document.getElementById('status').innerText = msg;
-    }
+        setTimeout(() => {
+          isProcessing = false;
+          if (isScanning) html5QrCode.resume();
+        }, 2500);
+      };
 
-    function showResult(type, html) {
-      document.getElementById('result').innerHTML =
-        '<div class="card ' + type + '">' + html + '</div>';
-    }
+      script.onerror = function() {
+        delete window[callbackName];
+        document.body.removeChild(script);
+        setStatus('❌ Network error.');
+        showResult('error', '❌ Could not reach server.');
+        setTimeout(() => {
+          isProcessing = false;
+          if (isScanning) html5QrCode.resume();
+        }, 2500);
+      };
 
-    function escapeHtml(str) {
-      return String(str)
-        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    }
+      script.src = APPS_SCRIPT_URL + '?qrData=' + encodeURIComponent(decodedText) + '&callback=' + callbackName;
+      document.body.appendChild(script);
   </script>
 </body>
 </html>
