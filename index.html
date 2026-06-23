@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Batch Party Check-In</title>
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial; background: #f0f0f0; min-height: 100vh; }
+
+    .header {
+      background: #4CAF50;
+      color: white;
+      padding: 20px;
+      text-align: center;
+      font-size: 22px;
+      font-weight: bold;
+    }
+
+    .container { padding: 20px; max-width: 400px; margin: 0 auto; }
+
+    #reader {
+      width: 100%;
+      border-radius: 12px;
+      overflow: hidden;
+      margin: 20px 0;
+      background: #000;
+    }
+
+    #startBtn {
+      width: 100%;
+      padding: 16px;
+      font-size: 18px;
+      background: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      margin-bottom: 10px;
+    }
+
+    #stopBtn {
+      width: 100%;
+      padding: 12px;
+      font-size: 16px;
+      background: #e53935;
+      color: white;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      margin-bottom: 10px;
+      display: none;
+    }
+
+    #status {
+      text-align: center;
+      padding: 10px;
+      color: #555;
+      font-size: 15px;
+    }
+
+    .card {
+      background: white;
+      border-radius: 10px;
+      padding: 16px;
+      margin: 10px 0;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      font-size: 15px;
+      text-align: center;
+    }
+
+    .success { border-left: 5px solid #4CAF50; }
+    .warning { border-left: 5px solid #ff9800; }
+    .error   { border-left: 5px solid #e53935; }
+
+    #result { margin-top: 10px; }
+  </style>
+</head>
+<body>
+
+  <div class="header">🎉 Batch Party Check-In</div>
+
+  <div class="container">
+    <p id="status">Tap Start to begin scanning</p>
+    <button id="startBtn">📸 Start Scan</button>
+    <button id="stopBtn">⏹ Stop Scan</button>
+    <div id="reader"></div>
+    <div id="result"></div>
+  </div>
+
+  <script>
+    // ⚠️ REPLACE THIS WITH YOUR APPS SCRIPT URL
+    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxV4nqvS_OnsB6dwSN82G70RPmAAl7f4gQPRSFbvVDF7jDGHW1JAeDcgIya2gFMhpyrqg/exec';
+
+    let html5QrCode = null;
+    let isScanning = false;
+    let isProcessing = false;
+
+    document.getElementById('startBtn').addEventListener('click', startScanner);
+    document.getElementById('stopBtn').addEventListener('click', stopScanner);
+
+    function startScanner() {
+      html5QrCode = new Html5Qrcode("reader");
+
+      html5QrCode.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: { width: 220, height: 220 } },
+        onScanSuccess,
+        () => {}
+      ).then(() => {
+        isScanning = true;
+        setStatus('✅ Scanning… point at a QR code');
+        document.getElementById('startBtn').style.display = 'none';
+        document.getElementById('stopBtn').style.display = 'block';
+      }).catch(err => {
+        setStatus('❌ Camera error: ' + err);
+      });
+    }
+
+    function stopScanner() {
+      if (html5QrCode && isScanning) {
+        html5QrCode.stop().then(() => {
+          isScanning = false;
+          html5QrCode.clear();
+          document.getElementById('startBtn').style.display = 'block';
+          document.getElementById('stopBtn').style.display = 'none';
+          setStatus('Stopped. Tap Start to scan again.');
+        });
+      }
+    }
+
+    function onScanSuccess(decodedText) {
+      if (isProcessing) return;
+      isProcessing = true;
+
+      html5QrCode.pause();
+      setStatus('⏳ Checking in…');
+      showResult('', '🔍 Read: <strong>' + escapeHtml(decodedText) + '</strong>');
+
+      // Call Apps Script via fetch
+      fetch(APPS_SCRIPT_URL + '?qrData=' + encodeURIComponent(decodedText))
+        .then(res => res.json())
+        .then(response => {
+          if (response.status === 'success') {
+            setStatus('✅ Done! Ready for next scan.');
+            showResult('success', '✅ Checked in: <strong>' + escapeHtml(response.name) + '</strong>');
+          } else if (response.status === 'already') {
+            setStatus('⚠️ Already checked in.');
+            showResult('warning', '⚠️ Already checked in: <strong>' + escapeHtml(response.name) + '</strong>');
+          } else if (response.status === 'notfound') {
+            setStatus('❌ Not found in sheet.');
+            showResult('error', '❌ QR code not found in the sheet.');
+          } else {
+            setStatus('❌ Error occurred.');
+            showResult('error', '❌ ' + escapeHtml(response.message || 'Unknown error'));
+          }
+        })
+        .catch(err => {
+          setStatus('❌ Network error.');
+          showResult('error', '❌ Could not reach server. Check your URL.');
+        })
+        .finally(() => {
+          setTimeout(() => {
+            isProcessing = false;
+            if (isScanning) html5QrCode.resume();
+          }, 2500);
+        });
+    }
+
+    function setStatus(msg) {
+      document.getElementById('status').innerText = msg;
+    }
+
+    function showResult(type, html) {
+      document.getElementById('result').innerHTML =
+        '<div class="card ' + type + '">' + html + '</div>';
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+  </script>
+</body>
+</html>
